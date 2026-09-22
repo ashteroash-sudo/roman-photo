@@ -395,6 +395,26 @@
     pointer-events: none;
     animation: portrait-in 0.25s ease-out;
     z-index: 8;
+    display: flex;
+    align-items: flex-end;
+  }
+  .npc-portrait .npc-portrait-img {
+    height: 100%;
+    width: auto;
+    display: block;
+    filter: drop-shadow(0 14px 28px rgba(0,0,0,0.65));
+  }
+  .npc-portrait .npc-portrait-placeholder {
+    height: 75%;
+    width: 150px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: linear-gradient(160deg, #162026, #0d1216);
+    border: 1px solid var(--gold-soft);
+    border-radius: 10px;
   }
 
   /* ---------- Side panel ---------- */
@@ -1171,20 +1191,15 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     const layer = document.getElementById("npc-portrait-layer");
     layer.innerHTML = "";
     const active = activeNpcOrder.slice(0, 4);
-    const widthByCount = { 1: 34, 2: 26, 3: 20, 4: 20 };
-    const w = widthByCount[active.length] || 20;
     active.forEach((fileName, i) => {
       const card = document.createElement("div");
       card.className = "npc-portrait";
       card.style.left = SLOT_POSITIONS[i];
-      card.style.width = w + "%";
       const url = npcObjectURLs[fileName];
       const entry = npcList.find(n => n.fileName === fileName);
       const displayName = entry ? entry.displayName : fileName;
       card.innerHTML =
-        '<div class="portrait-visual">' +
-          (url ? '<img class="portrait-img" src="' + url + '">' : '<div class="portrait-placeholder"><div class="icon">🧍</div></div>') +
-        '</div>' +
+        (url ? '<img class="npc-portrait-img" src="' + url + '">' : '<div class="npc-portrait-placeholder"><div class="icon">🧍</div></div>') +
         '<div class="portrait-name">' + displayName + '</div>';
       layer.appendChild(card);
     });
