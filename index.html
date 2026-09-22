@@ -986,14 +986,71 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     renderNpcChecklist();
   }
 
+  function loadImageFromFile(file) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const url = URL.createObjectURL(file);
+      img.onload = () => resolve({ img, url });
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+
+  async function trimTransparentPadding(file) {
+    try {
+      const { img, url } = await loadImageFromFile(file);
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(img, 0, 0);
+      let data;
+      try {
+        data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      } catch (e) {
+        return url; // lecture bloquée (rare en local) : on garde l'image telle quelle
+      }
+      let minX = canvas.width, minY = canvas.height, maxX = -1, maxY = -1;
+      const threshold = 10;
+      const step = canvas.width * canvas.height > 4000000 ? 2 : 1; // sous-échantillonnage si grande image
+      for (let y = 0; y < canvas.height; y += step) {
+        for (let x = 0; x < canvas.width; x += step) {
+          const alpha = data[(y * canvas.width + x) * 4 + 3];
+          if (alpha > threshold) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+      if (maxX < minX || maxY < minY) return url; // image vide ou sans transparence exploitable
+      const w = maxX - minX + 1;
+      const h = maxY - minY + 1;
+      // pas de recadrage utile si la transparence occupe une part négligeable
+      if (w >= canvas.width * 0.98 && h >= canvas.height * 0.98) return url;
+      const outCanvas = document.createElement("canvas");
+      outCanvas.width = w;
+      outCanvas.height = h;
+      outCanvas.getContext("2d").drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      return await new Promise((resolve) => {
+        outCanvas.toBlob((blob) => resolve(blob ? URL.createObjectURL(blob) : url), "image/png");
+      });
+    } catch (e) {
+      return URL.createObjectURL(file);
+    }
+  }
+
   async function ensureNpcObjectURL(fileName) {
     if (npcObjectURLs[fileName]) return npcObjectURLs[fileName];
     if (!npcDirHandle) return null;
     try {
       const fh = await npcDirHandle.getFileHandle(fileName);
       const file = await fh.getFile();
-      const url = URL.createObjectURL(file);
+      const url = await trimTransparentPadding(file);
       npcObjectURLs[fileName] = url;
+      renderNpcPortraits();
       return url;
     } catch (e) {
       return null;
