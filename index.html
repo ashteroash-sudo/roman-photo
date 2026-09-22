@@ -437,7 +437,7 @@
     align-items: center;
     justify-content: space-between;
   }
-  #npc-refresh {
+  #npc-refresh, #notes-refresh, #notes-pick {
     background: none;
     border: none;
     color: var(--ink-dim);
@@ -447,7 +447,8 @@
     text-transform: none;
     letter-spacing: normal;
   }
-  #npc-refresh:hover { color: var(--gold); }
+  #npc-refresh:hover, #notes-refresh:hover, #notes-pick:hover { color: var(--gold); }
+  .h3-actions { display: flex; gap: 8px; }
   #npc-checklist { padding-bottom: 10px; }
   #npc-checklist .empty {
     color: var(--ink-dim);
@@ -494,8 +495,62 @@
     color: var(--ink-dim);
     line-height: 1.5;
   }
-  .accordion-item.open .acc-body { max-height: 220px; }
+  .accordion-item.open .acc-body { max-height: 340px; }
   .accordion-item .acc-body-inner { padding: 0 14px 14px; }
+  .note-text {
+    white-space: pre-wrap;
+    font-size: 0.82rem;
+    line-height: 1.55;
+    color: var(--ink);
+  }
+  .note-pdf {
+    width: 100%;
+    height: 320px;
+    border: none;
+    border-radius: 6px;
+    background: #fff;
+  }
+  #notes-viewer { padding: 0 14px 14px; }
+  #notes-viewer .empty { color: var(--ink-dim); font-style: italic; font-size: 0.8rem; }
+  .doc-text-view {
+    max-height: 46vh;
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+  .doc-pdf-controls {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+    font-size: 0.8rem;
+    color: var(--ink-dim);
+  }
+  .doc-pdf-controls input[type="number"] {
+    width: 56px;
+    background: var(--bg-void);
+    border: 1px solid var(--panel-edge);
+    color: var(--ink);
+    border-radius: 6px;
+    padding: 4px 6px;
+    font-size: 0.8rem;
+  }
+  .doc-pdf-controls button {
+    background: none;
+    border: 1px solid var(--panel-edge);
+    color: var(--ink-dim);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+  .doc-pdf-controls button:hover { color: var(--gold); border-color: var(--gold-soft); }
+  .doc-pdf-frame { height: 44vh; }
+  .doc-file-name {
+    font-size: 0.75rem;
+    color: var(--ink-dim);
+    margin-bottom: 8px;
+    word-break: break-all;
+  }
 
   .zone-info-box {
     margin: 10px 14px;
@@ -706,8 +761,13 @@
       <h3>Zone sélectionnée</h3>
       <div id="zone-info" class="zone-info-box"><span class="empty">Clique une zone pour voir ses réglages.</span></div>
 
-      <h3>Notes de scénario</h3>
-      <div id="accordion"></div>
+      <h3>Notes de scénario
+        <span class="h3-actions">
+          <button id="notes-pick" title="Choisir le fichier">📁</button>
+          <button id="notes-refresh" title="Actualiser">🔄</button>
+        </span>
+      </h3>
+      <div id="notes-viewer"><span class="empty">Ouvre un dossier de scénario.</span></div>
 
       <h3>Personnages <button id="npc-refresh" title="Actualiser la liste">🔄</button></h3>
       <div id="npc-checklist"></div>
@@ -1394,6 +1454,7 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
       await scanNpcFolder();
       broadcastState();
       render();
+      loadScenarioDocConfig();
     } catch (e) {
       // sélection annulée par l'utilisateur
     }
@@ -2321,29 +2382,135 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
   }
 
   // ---------------------------------------------------------------
-  // Accordéon texte / scénario
+  // Notes de scénario (UN fichier PDF/TXT/MD pour tout le scénario,
+  // à la racine du dossier — indépendant des scènes, position retenue)
   // ---------------------------------------------------------------
 
-  const NOTES = [
-    { title: "Chapitre 1 — Ce que savent les PJ", body: "Emplacement réservé : résumé de situation, ce que le groupe sait déjà en arrivant dans le bureau." },
-    { title: "Fiches PNJ", body: "Emplacement réservé : statblocks / mobiles des PNJ liés à cette scène." },
-    { title: "Indices cachés", body: "Emplacement réservé : liste des indices et où ils sont planqués dans les zones." }
-  ];
-  const accordionEl = document.getElementById("accordion");
-  NOTES.forEach((note, i) => {
-    const item = document.createElement("div");
-    item.className = "accordion-item";
-    item.innerHTML =
-      '<div class="acc-head"><span>' + note.title + '</span><span class="acc-arrow">▶</span></div>' +
-      '<div class="acc-body"><div class="acc-body-inner">' + note.body + '</div></div>';
-    item.querySelector(".acc-head").addEventListener("click", () => {
-      item.classList.toggle("open");
-    });
-    accordionEl.appendChild(item);
-  });
+  let scenarioDocFileName = null;
+  let scenarioDocKind = null; // 'pdf' | 'text'
+  let scenarioDocPosition = 0; // scrollTop (texte) ou n° de page (pdf)
+  let scenarioDocObjectURL = null;
+
+  async function saveScenarioDocConfig() {
+    if (!rootDirHandle) return;
+    try {
+      const fh = await rootDirHandle.getFileHandle("scenario-doc.json", { create: true });
+      const w = await fh.createWritable();
+      await w.write(JSON.stringify({
+        fileName: scenarioDocFileName,
+        kind: scenarioDocKind,
+        position: scenarioDocPosition
+      }, null, 2));
+      await w.close();
+    } catch (e) {}
+  }
+
+  async function loadScenarioDocConfig() {
+    scenarioDocFileName = null;
+    scenarioDocKind = null;
+    scenarioDocPosition = 0;
+    if (!rootDirHandle) { renderScenarioDoc(); return; }
+    try {
+      const fh = await rootDirHandle.getFileHandle("scenario-doc.json");
+      const file = await fh.getFile();
+      const cfg = JSON.parse(await file.text());
+      scenarioDocFileName = cfg.fileName || null;
+      scenarioDocKind = cfg.kind || null;
+      scenarioDocPosition = cfg.position || 0;
+    } catch (e) {
+      // pas encore de fichier choisi pour ce scénario
+    }
+    await renderScenarioDoc();
+  }
+
+  async function pickScenarioDoc() {
+    if (!rootDirHandle) { showToast("Ouvre d'abord un dossier de scénario.", true); return; }
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        types: [{ description: "Scénario", accept: { "application/pdf": [".pdf"], "text/plain": [".txt"], "text/markdown": [".md"] } }]
+      });
+      const file = await handle.getFile();
+      await writeFileIntoDir(rootDirHandle, file.name, file);
+      scenarioDocFileName = file.name;
+      scenarioDocKind = /\.pdf$/i.test(file.name) ? "pdf" : "text";
+      scenarioDocPosition = 0;
+      await saveScenarioDocConfig();
+      await renderScenarioDoc();
+    } catch (e) {
+      // sélection annulée
+    }
+  }
+
+  async function renderScenarioDoc() {
+    const el = document.getElementById("notes-viewer");
+    if (!rootDirHandle) {
+      el.innerHTML = '<span class="empty">Ouvre un dossier de scénario.</span>';
+      return;
+    }
+    if (!scenarioDocFileName) {
+      el.innerHTML = '<span class="empty">Aucun fichier choisi — clique 📁 pour sélectionner ton PDF ou TXT de scénario.</span>';
+      return;
+    }
+    let file;
+    try {
+      const fh = await rootDirHandle.getFileHandle(scenarioDocFileName);
+      file = await fh.getFile();
+    } catch (e) {
+      el.innerHTML = '<span class="empty">Fichier introuvable ("' + scenarioDocFileName + '"). Clique 📁 pour en choisir un autre.</span>';
+      return;
+    }
+
+    el.innerHTML = '<div class="doc-file-name">' + scenarioDocFileName + '</div>';
+
+    if (scenarioDocKind === "pdf") {
+      if (scenarioDocObjectURL) URL.revokeObjectURL(scenarioDocObjectURL);
+      scenarioDocObjectURL = URL.createObjectURL(file);
+      const page = scenarioDocPosition || 1;
+
+      const controls = document.createElement("div");
+      controls.className = "doc-pdf-controls";
+      controls.innerHTML =
+        '<label>Page</label>' +
+        '<input type="number" id="doc-page-input" min="1" value="' + page + '">' +
+        '<button id="doc-page-go">Reprendre ici</button>';
+      el.appendChild(controls);
+
+      const iframe = document.createElement("iframe");
+      iframe.className = "note-pdf doc-pdf-frame";
+      iframe.src = scenarioDocObjectURL + "#page=" + page;
+      el.appendChild(iframe);
+
+      document.getElementById("doc-page-go").addEventListener("click", () => {
+        const val = parseInt(document.getElementById("doc-page-input").value, 10) || 1;
+        scenarioDocPosition = val;
+        saveScenarioDocConfig();
+        iframe.src = scenarioDocObjectURL + "#page=" + val;
+      });
+    } else {
+      const text = await file.text();
+      const viewEl = document.createElement("div");
+      viewEl.className = "note-text doc-text-view";
+      viewEl.textContent = text;
+      el.appendChild(viewEl);
+      viewEl.scrollTop = scenarioDocPosition || 0;
+
+      let saveTimeout = null;
+      viewEl.addEventListener("scroll", () => {
+        clearTimeout(saveTimeout);
+        saveTimeout = setTimeout(() => {
+          scenarioDocPosition = viewEl.scrollTop;
+          saveScenarioDocConfig();
+        }, 600);
+      });
+    }
+  }
+
+  document.getElementById("notes-pick").addEventListener("click", pickScenarioDoc);
+  document.getElementById("notes-refresh").addEventListener("click", renderScenarioDoc);
 
   // ---------------------------------------------------------------
   render();
+  loadScenarioDocConfig();
 })();
 </script>
 </body>
