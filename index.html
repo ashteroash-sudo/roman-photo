@@ -971,6 +971,12 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
 
   async function scanNpcFolder() {
     npcList = [];
+    // on vide le cache d'images pour forcer une relecture depuis le disque
+    // (utile si un fichier a été remplacé en gardant le même nom)
+    Object.keys(npcObjectURLs).forEach(fileName => {
+      try { URL.revokeObjectURL(npcObjectURLs[fileName]); } catch (e) {}
+      delete npcObjectURLs[fileName];
+    });
     if (!rootDirHandle) { renderNpcChecklist(); return; }
     try {
       npcDirHandle = await rootDirHandle.getDirectoryHandle("npc", { create: true });
@@ -984,6 +990,7 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
       showToast('Impossible de lire le dossier "npc".', true);
     }
     renderNpcChecklist();
+    if (activeNpcOrder.length) await hydrateActiveNpcImages();
   }
 
   function loadImageFromFile(file) {
