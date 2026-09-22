@@ -1003,6 +1003,47 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     });
   }
 
+  function colorDistance(r1, g1, b1, r2, g2, b2) {
+    const dr = r1 - r2, dg = g1 - g2, db = b1 - b2;
+    return Math.sqrt(dr * dr + dg * dg + db * db);
+  }
+
+  function trimByBackgroundColor(canvas, data) {
+    const w = canvas.width, h = canvas.height;
+    const px = (x, y) => { const i = (y * w + x) * 4; return [data[i], data[i + 1], data[i + 2]]; };
+    const corners = [px(0, 0), px(w - 1, 0), px(0, h - 1), px(w - 1, h - 1)];
+    const bgR = (corners[0][0] + corners[1][0] + corners[2][0] + corners[3][0]) / 4;
+    const bgG = (corners[0][1] + corners[1][1] + corners[2][1] + corners[3][1]) / 4;
+    const bgB = (corners[0][2] + corners[1][2] + corners[2][2] + corners[3][2]) / 4;
+    const tol = 26;
+    const rowStep = w > 2000 ? 2 : 1;
+    const colStep = h > 2000 ? 2 : 1;
+    const rowIsBg = (y) => {
+      let match = 0, total = 0;
+      for (let x = 0; x < w; x += rowStep) {
+        total++;
+        const i = (y * w + x) * 4;
+        if (colorDistance(data[i], data[i + 1], data[i + 2], bgR, bgG, bgB) < tol) match++;
+      }
+      return match / total > 0.92;
+    };
+    const colIsBg = (x) => {
+      let match = 0, total = 0;
+      for (let y = 0; y < h; y += colStep) {
+        total++;
+        const i = (y * w + x) * 4;
+        if (colorDistance(data[i], data[i + 1], data[i + 2], bgR, bgG, bgB) < tol) match++;
+      }
+      return match / total > 0.92;
+    };
+    let top = 0, bottom = h - 1, left = 0, right = w - 1;
+    while (top < bottom && rowIsBg(top)) top++;
+    while (bottom > top && rowIsBg(bottom)) bottom--;
+    while (left < right && colIsBg(left)) left++;
+    while (right > left && colIsBg(right)) right--;
+    return { minX: left, minY: top, maxX: right, maxY: bottom };
+  }
+
   async function trimTransparentPadding(file) {
     try {
       const { img, url } = await loadImageFromFile(file);
@@ -1017,9 +1058,11 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
       } catch (e) {
         return url; // lecture bloquée (rare en local) : on garde l'image telle quelle
       }
+
+      // 1) essai par transparence (alpha)
       let minX = canvas.width, minY = canvas.height, maxX = -1, maxY = -1;
       const threshold = 10;
-      const step = canvas.width * canvas.height > 4000000 ? 2 : 1; // sous-échantillonnage si grande image
+      const step = canvas.width * canvas.height > 4000000 ? 2 : 1;
       for (let y = 0; y < canvas.height; y += step) {
         for (let x = 0; x < canvas.width; x += step) {
           const alpha = data[(y * canvas.width + x) * 4 + 3];
@@ -1031,15 +1074,30 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
           }
         }
       }
-      if (maxX < minX || maxY < minY) return url; // image vide ou sans transparence exploitable
-      const w = maxX - minX + 1;
-      const h = maxY - minY + 1;
-      // pas de recadrage utile si la transparence occupe une part négligeable
-      if (w >= canvas.width * 0.98 && h >= canvas.height * 0.98) return url;
+      let bbox = null;
+      if (maxX >= minX && maxY >= minY) {
+        const aw = maxX - minX + 1, ah = maxY - minY + 1;
+        if (!(aw >= canvas.width * 0.98 && ah >= canvas.height * 0.98)) {
+          bbox = { minX, minY, maxX, maxY };
+        }
+      }
+
+      // 2) sinon, essai par couleur de fond dominante sur les bords
+      if (!bbox) {
+        const cb = trimByBackgroundColor(canvas, data);
+        const cw = cb.maxX - cb.minX + 1, ch = cb.maxY - cb.minY + 1;
+        if (cb.maxX > cb.minX && cb.maxY > cb.minY && !(cw >= canvas.width * 0.97 && ch >= canvas.height * 0.97)) {
+          bbox = cb;
+        }
+      }
+
+      if (!bbox) return url; // rien d'utile à recadrer
+      const w = bbox.maxX - bbox.minX + 1;
+      const h = bbox.maxY - bbox.minY + 1;
       const outCanvas = document.createElement("canvas");
       outCanvas.width = w;
       outCanvas.height = h;
-      outCanvas.getContext("2d").drawImage(canvas, minX, minY, w, h, 0, 0, w, h);
+      outCanvas.getContext("2d").drawImage(canvas, bbox.minX, bbox.minY, w, h, 0, 0, w, h);
       URL.revokeObjectURL(url);
       return await new Promise((resolve) => {
         outCanvas.toBlob((blob) => resolve(blob ? URL.createObjectURL(blob) : url), "image/png");
