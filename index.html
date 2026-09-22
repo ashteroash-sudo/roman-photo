@@ -512,6 +512,94 @@
   }
   #notes-viewer { padding: 0 14px 14px; }
   #notes-viewer .empty { color: var(--ink-dim); font-style: italic; font-size: 0.8rem; }
+  #notes-summary { padding: 0 14px 14px; }
+  #notes-summary .empty { color: var(--ink-dim); font-style: italic; font-size: 0.8rem; }
+  .notes-open-btn {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: var(--bg-void);
+    border: 1px solid var(--panel-edge);
+    color: var(--ink);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 0.83rem;
+    cursor: pointer;
+    word-break: break-all;
+  }
+  .notes-open-btn:hover { border-color: var(--gold-soft); color: var(--gold); }
+
+  .notes-floating-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.62);
+    z-index: 300;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .notes-floating-overlay.hidden { display: none; }
+  .notes-floating-panel {
+    width: 88vw;
+    height: 88vh;
+    background: var(--panel);
+    border: 1px solid var(--gold-soft);
+    border-radius: 12px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.7);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .notes-floating-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 18px;
+    background: var(--bg-void);
+    border-bottom: 1px solid var(--panel-edge);
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .notes-floating-header span {
+    color: var(--gold);
+    font-size: 0.95rem;
+    font-family: Georgia, 'Times New Roman', serif;
+    font-style: italic;
+  }
+  #notes-floating-close {
+    background: none;
+    border: 1px solid var(--panel-edge);
+    color: var(--ink-dim);
+    border-radius: 6px;
+    width: 30px;
+    height: 30px;
+    cursor: pointer;
+    font-size: 1rem;
+  }
+  #notes-floating-close:hover { color: var(--ink); border-color: var(--gold-soft); }
+  .notes-floating-body {
+    flex: 1;
+    overflow: auto;
+    padding: 22px 30px;
+    min-height: 0;
+  }
+  .notes-floating-body .note-text {
+    font-size: 1.05rem;
+    line-height: 1.75;
+    max-height: none;
+  }
+  .notes-floating-body .doc-text-view {
+    max-height: none;
+    overflow: visible;
+  }
+  .notes-floating-body .doc-pdf-frame,
+  .notes-floating-body .note-pdf {
+    width: 100%;
+    height: calc(88vh - 150px);
+  }
+  .notes-floating-body .doc-file-name {
+    font-size: 0.8rem;
+  }
   .doc-text-view {
     max-height: 46vh;
     overflow-y: auto;
@@ -604,6 +692,7 @@
   /* ---------- Player mode: strip everything ---------- */
   body.mode-player #topbar,
   body.mode-player #side-panel,
+  body.mode-player #notes-floating-overlay,
   body.mode-player .zone-label {
     display: none !important;
   }
@@ -767,10 +856,20 @@
           <button id="notes-refresh" title="Actualiser">🔄</button>
         </span>
       </h3>
-      <div id="notes-viewer"><span class="empty">Ouvre un dossier de scénario.</span></div>
+      <div id="notes-summary"><span class="empty">Ouvre un dossier de scénario.</span></div>
 
       <h3>Personnages <button id="npc-refresh" title="Actualiser la liste">🔄</button></h3>
       <div id="npc-checklist"></div>
+    </div>
+  </div>
+
+  <div id="notes-floating-overlay" class="notes-floating-overlay hidden">
+    <div class="notes-floating-panel">
+      <div class="notes-floating-header" id="notes-floating-header">
+        <span id="notes-floating-title">Notes de scénario</span>
+        <button id="notes-floating-close" title="Réduire">✕</button>
+      </div>
+      <div id="notes-floating-body" class="notes-floating-body"></div>
     </div>
   </div>
 
@@ -2087,6 +2186,7 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
       state.mode = btn.dataset.mode;
       if (state.mode === "player") requestStateFromPeers();
       if (state.mode !== "edit") cancelDrawing();
+      closeNotesFloating();
       render();
     });
   });
@@ -2441,8 +2541,50 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     }
   }
 
+  function updateNotesSummary() {
+    const el = document.getElementById("notes-summary");
+    if (!rootDirHandle) {
+      el.innerHTML = '<span class="empty">Ouvre un dossier de scénario.</span>';
+      return;
+    }
+    if (!scenarioDocFileName) {
+      el.innerHTML = '<span class="empty">Aucun fichier choisi.</span>';
+      return;
+    }
+    el.innerHTML = '<button id="notes-open-float" class="notes-open-btn">📖 ' + scenarioDocFileName + '</button>';
+    document.getElementById("notes-open-float").addEventListener("click", toggleNotesFloating);
+  }
+
+  function openNotesFloating() {
+    if (!scenarioDocFileName) return;
+    const overlay = document.getElementById("notes-floating-overlay");
+    overlay.classList.remove("hidden");
+    document.getElementById("notes-floating-title").textContent = scenarioDocFileName;
+    requestAnimationFrame(() => {
+      const viewEl = document.querySelector("#notes-floating-body .doc-text-view");
+      if (viewEl) viewEl.scrollTop = scenarioDocPosition || 0;
+    });
+  }
+
+  function closeNotesFloating() {
+    document.getElementById("notes-floating-overlay").classList.add("hidden");
+  }
+
+  function toggleNotesFloating() {
+    const overlay = document.getElementById("notes-floating-overlay");
+    if (overlay.classList.contains("hidden")) openNotesFloating();
+    else closeNotesFloating();
+  }
+
+  document.getElementById("notes-floating-close").addEventListener("click", closeNotesFloating);
+  document.getElementById("notes-floating-header").addEventListener("click", closeNotesFloating);
+  document.getElementById("notes-floating-overlay").addEventListener("click", (e) => {
+    if (e.target.id === "notes-floating-overlay") closeNotesFloating();
+  });
+
   async function renderScenarioDoc() {
-    const el = document.getElementById("notes-viewer");
+    updateNotesSummary();
+    const el = document.getElementById("notes-floating-body");
     if (!rootDirHandle) {
       el.innerHTML = '<span class="empty">Ouvre un dossier de scénario.</span>';
       return;
@@ -2492,7 +2634,6 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
       viewEl.className = "note-text doc-text-view";
       viewEl.textContent = text;
       el.appendChild(viewEl);
-      viewEl.scrollTop = scenarioDocPosition || 0;
 
       let saveTimeout = null;
       viewEl.addEventListener("scroll", () => {
