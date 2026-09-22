@@ -130,6 +130,16 @@
     font-size: 0.8rem;
     max-width: 160px;
   }
+  #disk-delete-scene {
+    background: none;
+    border: 1px solid var(--danger);
+    color: #e08a8a;
+    border-radius: 8px;
+    padding: 6px 12px;
+    font-size: 0.8rem;
+    cursor: pointer;
+    white-space: nowrap;
+  }
 
   #draw-toggle {
     background: none;
@@ -300,6 +310,75 @@
   }
   .insert-placeholder .icon { font-size: 2.2rem; opacity: 0.8; }
   .insert-placeholder .cap { color: var(--ink-dim); font-size: 0.8rem; max-width: 320px; }
+
+  /* ---------- Portrait (zones "personnage", façon JRPG) ---------- */
+  .portrait-card {
+    position: absolute;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 60%;
+    height: 88%;
+    pointer-events: auto;
+    animation: portrait-in 0.25s ease-out;
+  }
+  @keyframes portrait-in {
+    from { opacity: 0; transform: translate(-50%, 40px); }
+    to   { opacity: 1; transform: translate(-50%, 0); }
+  }
+  .portrait-card .portrait-visual {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+  }
+  .portrait-card .portrait-img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    filter: drop-shadow(0 14px 28px rgba(0,0,0,0.65));
+  }
+  .portrait-card .portrait-placeholder {
+    width: 100%;
+    height: 75%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background: linear-gradient(160deg, #162026, #0d1216);
+    border: 1px solid var(--gold-soft);
+    border-radius: 10px;
+  }
+  .portrait-card .portrait-close {
+    position: absolute;
+    top: 0;
+    right: 6px;
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    border: 1px solid var(--panel-edge);
+    background: rgba(10, 20, 24, 0.85);
+    color: var(--ink-dim);
+    cursor: pointer;
+    z-index: 5;
+  }
+  .portrait-card .portrait-close:hover { color: var(--ink); border-color: var(--gold-soft); }
+  .portrait-card .portrait-name {
+    position: absolute;
+    bottom: 6px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(10, 20, 24, 0.9);
+    border: 1px solid var(--gold-soft);
+    color: var(--gold);
+    padding: 4px 16px;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    z-index: 5;
+  }
 
   /* ---------- Side panel ---------- */
   #side-panel {
@@ -536,6 +615,7 @@
     </div>
     <button id="disk-open-root">📁 Dossier scénario</button>
     <select id="disk-scene-select" style="display:none;"></select>
+    <button id="disk-delete-scene" style="display:none;">🗑️ Supprimer la scène</button>
     <div id="breadcrumb"></div>
     <button id="draw-toggle">✏️ Créer une zone</button>
     <button id="audio-toggle">🔈 Activer le son</button>
@@ -694,6 +774,7 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
   const sceneBg = document.getElementById("scene-bg");
   const diskRootBtn = document.getElementById("disk-open-root");
   const diskSceneSelect = document.getElementById("disk-scene-select");
+  const diskDeleteBtn = document.getElementById("disk-delete-scene");
 
   // ---------------------------------------------------------------
   // Branchement disque (File System Access API)
@@ -848,7 +929,8 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     musicAudioEl.pause();
     if (sceneData.music) {
       try {
-        const fh = await sceneDir.getFileHandle(sceneData.music);
+        const musiquesDir = await sceneDir.getDirectoryHandle("musiques");
+        const fh = await musiquesDir.getFileHandle(sceneData.music);
         const file = await fh.getFile();
         musicObjectURL = URL.createObjectURL(file);
       } catch (e) {}
@@ -869,6 +951,9 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     state.insertStack = [];
     state.selectedZoneId = null;
     diskSceneSelect.value = folderName;
+    diskDeleteBtn.style.display = "inline-block";
+    diskDeleteBtn.dataset.confirm = "";
+    diskDeleteBtn.textContent = "🗑️ Supprimer la scène";
 
     if (state.audioEnabled) {
       stopAmbient();
@@ -892,9 +977,10 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
 
     let musicDestName = null;
     if (musicFile) {
+      const musiquesDir = await sceneDir.getDirectoryHandle("musiques", { create: true });
       const mExt = (musicFile.name.split(".").pop() || "mp3").toLowerCase();
       musicDestName = "musique." + mExt;
-      await writeFileIntoDir(sceneDir, musicDestName, musicFile);
+      await writeFileIntoDir(musiquesDir, musicDestName, musicFile);
     }
 
     const sceneData = { name: name, background: bgDestName, music: musicDestName, zones: [] };
@@ -963,6 +1049,24 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     });
   }
 
+  function clearCurrentScene() {
+    if (bgObjectURL) URL.revokeObjectURL(bgObjectURL);
+    bgObjectURL = null;
+    if (musicObjectURL) URL.revokeObjectURL(musicObjectURL);
+    musicObjectURL = null;
+    musicAudioEl.pause();
+    musicAudioEl.src = "";
+    currentSceneDirHandle = null;
+    currentSceneName = null;
+    currentSceneMeta = { background: null, music: null };
+    ZONES.length = 0;
+    state.sceneId = null;
+    state.insertStack = [];
+    state.selectedZoneId = null;
+    diskDeleteBtn.style.display = "none";
+    diskDeleteBtn.dataset.confirm = "";
+  }
+
   diskRootBtn.addEventListener("click", async () => {
     if (!fsApiSupported()) {
       showToast("Navigateur non compatible — utilise Chrome ou Edge.", true);
@@ -970,9 +1074,39 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     }
     try {
       rootDirHandle = await window.showDirectoryPicker();
+      clearCurrentScene();
       await scanScenes();
+      broadcastState();
+      render();
     } catch (e) {
       // sélection annulée par l'utilisateur
+    }
+  });
+
+  diskDeleteBtn.addEventListener("click", async () => {
+    if (!currentSceneName) return;
+    if (!diskDeleteBtn.dataset.confirm) {
+      diskDeleteBtn.dataset.confirm = "1";
+      diskDeleteBtn.textContent = "Cliquer à nouveau pour confirmer";
+      diskDeleteBtn.dataset.timeout = setTimeout(() => {
+        diskDeleteBtn.dataset.confirm = "";
+        diskDeleteBtn.textContent = "🗑️ Supprimer la scène";
+      }, 4000);
+      return;
+    }
+    clearTimeout(Number(diskDeleteBtn.dataset.timeout));
+    const nameToDelete = currentSceneName;
+    try {
+      await rootDirHandle.removeEntry(nameToDelete, { recursive: true });
+      delete loadedSceneNames[nameToDelete];
+      clearCurrentScene();
+      await scanScenes();
+      diskSceneSelect.value = "";
+      broadcastState();
+      render();
+      showToast("Scène supprimée.");
+    } catch (e) {
+      showToast("Échec de la suppression.", true);
     }
   });
 
@@ -1147,7 +1281,8 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
       const { list } = findZoneAtLevel(stack);
       const zone = list.find(z => z.id === id);
       if (!zone) break;
-      insertLayer.appendChild(makeInsertCard(zone, depth, stack.slice()));
+      const cardEl = zone.type === "personnage" ? makePortraitCard(zone, depth, stack.slice()) : makeInsertCard(zone, depth, stack.slice());
+      insertLayer.appendChild(cardEl);
       stack.push(id);
       depth++;
     }
@@ -1172,6 +1307,49 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
         }
       }
     }
+  }
+
+  function makePortraitCard(zone, depth, parentStack) {
+    const card = document.createElement("div");
+    card.className = "portrait-card";
+    card.style.zIndex = 20 + depth;
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "portrait-close";
+    closeBtn.textContent = "✕";
+    closeBtn.title = "Fermer";
+    closeBtn.addEventListener("click", () => setInsertStack(parentStack));
+
+    const visual = document.createElement("div");
+    visual.className = "portrait-visual";
+    if (zone.insert._url) {
+      visual.innerHTML = '<img class="portrait-img" src="' + zone.insert._url + '">';
+    } else {
+      visual.innerHTML =
+        '<div class="portrait-placeholder">' +
+          '<div class="icon">' + (zone.insert.icon || "🧍") + '</div>' +
+          '<div class="cap">' + zone.insert.caption + '</div>' +
+        '</div>';
+    }
+
+    const nameTag = document.createElement("div");
+    nameTag.className = "portrait-name";
+    nameTag.textContent = zone.name;
+
+    const zoneSvg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    zoneSvg.classList.add("zones", "insert-zone-svg");
+    zoneSvg.setAttribute("viewBox", "0 0 768 512");
+    zoneSvg.setAttribute("preserveAspectRatio", "none");
+    zoneSvg.style.position = "absolute";
+    zoneSvg.style.inset = "0";
+    zoneSvg.style.width = "100%";
+    zoneSvg.style.height = "100%";
+
+    card.appendChild(visual);
+    card.appendChild(nameTag);
+    card.appendChild(closeBtn);
+    card.appendChild(zoneSvg);
+    return card;
   }
 
   function makeInsertCard(zone, depth, parentStack) {
@@ -1233,7 +1411,7 @@ window.__SCENE_IMG__ = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDA
     breadcrumbEl.innerHTML = "";
     const root = document.createElement("span");
     root.className = "crumb" + (state.insertStack.length === 0 ? " current" : "");
-    root.textContent = diskMode ? (loadedSceneNames[state.sceneId] || state.sceneId) : SCENES[state.sceneId].name;
+    root.textContent = diskMode ? (state.sceneId ? (loadedSceneNames[state.sceneId] || state.sceneId) : "Aucune scène chargée") : SCENES[state.sceneId].name;
     root.addEventListener("click", () => setInsertStack([]));
     breadcrumbEl.appendChild(root);
 
